@@ -1,0 +1,6 @@
+
+
+# excludes the directories after the first - keeps the files at the first level
+af_sample/*/**/
+# just to be sure we will exclude pdbs in the third level
+af_sample/*/**/**/.pdb
