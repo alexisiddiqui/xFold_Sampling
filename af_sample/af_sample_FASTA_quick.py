@@ -58,16 +58,20 @@ def af_sample_FASTA_quick(fasta_path:str,
 
 if __name__ == "__main__":
     # test the function
-    fasta_path = "/home/alexi/Documents/colabquicktest/af_sample/BPTI/P00974.fasta"
-    fasta_path1 = "/home/alexi/Documents/colabquicktest/af_sample/MBP/MBP_wt.fasta"
-    fasta_path2 = "/home/alexi/Documents/colabquicktest/af_sample/LXRa/LXRa.fasta"
-    fasta_path3 = "/home/alexi/Documents/colabquicktest/af_sample/HOIP/HOIP_apo.fasta"
-    fasta_path4 = "/home/alexi/Documents/colabquicktest/af_sample/BRD4/BRD4_APO_484.fasta"
+    fasta_path  = "BPTI/P00974_60.fasta"
+    fasta_path1 = "MBP/MBP_wt.fasta"
+    fasta_path2 = "LXRa/LXRa.fasta"
+    fasta_path3 = "HOIP/HOIP_apo697.fasta"
+    fasta_path4 = "BRD4/BRD4_APO_484.fasta"
     # output_dir = fasta_path.split(".")[0] + "_af_sample"
 
-    af_sample_FASTA_quick(fasta_path)
+    # af_sample_FASTA_quick(fasta_path)
+    # af_sample_FASTA_quick(fasta_path1)
+    # af_sample_FASTA_quick(fasta_path2)
+    # af_sample_FASTA_quick(fasta_path3)
+    af_sample_FASTA_quick(fasta_path4)
     # af_sample_FASTA_quick(fasta_path4)
-    af_sample_FASTA_quick(fasta_path2)
+    # af_sample_FASTA_quick(fasta_path2)
 
 
 
