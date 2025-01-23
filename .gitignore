@@ -4,3 +4,6 @@
 af_sample/*/**/
 # just to be sure we will exclude pdbs in the third level
 af_sample/*/**/**/.pdb
+af_sample/*/**/**/.xtc
+
+bak
