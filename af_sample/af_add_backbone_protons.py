@@ -3,17 +3,14 @@
 
 
 import os
-import subprocess
-import numpy as np
-import MDAnalysis as mda
 from concurrent.futures import ProcessPoolExecutor
-import datetime
 
-def protonate_backbone_PDB(input_pdb:str,
-                           output_pdb:str,
-                           residue_range=tuple):
+import MDAnalysis as mda
+import numpy as np
 
-    H_bond_length = 1.02 # in Angstroms
+
+def protonate_backbone_PDB(input_pdb: str, output_pdb: str, residue_range=tuple):
+    H_bond_length = 1.02  # in Angstroms
 
     # first grab all the backbone nitrogen coordinates
     u = mda.Universe(input_pdb)
@@ -21,13 +18,13 @@ def protonate_backbone_PDB(input_pdb:str,
     first_resid = u.residues.resids[0]
 
     # print(len(u.residues))
-    residues = u.select_atoms(f'not resid {first_resid}').residues
+    residues = u.select_atoms(f"not resid {first_resid}").residues
     # print(residues.resids)
     last_resid = residues.resids[-1]
 
-    N = u.select_atoms(f'name N and not resid {first_resid}')
-    CA = u.select_atoms(f'name CA and not resid {first_resid}')
-    C = u.select_atoms(f'name C and not resid {last_resid}')
+    N = u.select_atoms(f"name N and not resid {first_resid}")
+    CA = u.select_atoms(f"name CA and not resid {first_resid}")
+    C = u.select_atoms(f"name C and not resid {last_resid}")
 
     N_xyz = N.positions
     # print(N_xyz.shape)
@@ -48,8 +45,8 @@ def protonate_backbone_PDB(input_pdb:str,
 
     # print("Original universe", u.atoms)
 
-    seg_index = [0]*len(H_xyz)
-    
+    seg_index = [0] * len(H_xyz)
+
     # create universe from N atoms - this is the universe we will add the hydrogens to
     H_universe = mda.Merge(N)
     # print("H universe", H_universe.atoms)
@@ -63,14 +60,12 @@ def protonate_backbone_PDB(input_pdb:str,
     H_universe.atoms.elements = "H"
 
     # print("H universe", H_universe.atoms)
-    
-    # remove PRO residues
-    H_universe = H_universe.select_atoms('not resname PRO')
 
+    # remove PRO residues
+    H_universe = H_universe.select_atoms("not resname PRO")
 
     # repeat for the N terminus
     # will need to condsider how to place H H2 H3
-
 
     # merge the H universe with the original universe
     u = mda.Merge(u.atoms, H_universe.atoms)
@@ -85,17 +80,10 @@ def protonate_backbone_PDB(input_pdb:str,
     # write the new pdb file
     u.atoms.write(output_pdb)
 
-       
 
-
-
-
-
-
-def protonate_backbone_AF_dir(input_dir:str,
-                              output_dir:str=None,
-                              recursive:bool=False,
-                              clean:bool=True):
+def protonate_backbone_AF_dir(
+    input_dir: str, output_dir: str = None, recursive: bool = False, clean: bool = True
+):
     """
     Protonates a directory of AF predicted PDBs adds protons to the backbone Nitrogen.
     This uses a barycentric embedding to compute the vector for the N-H bond.
@@ -116,10 +104,8 @@ def protonate_backbone_AF_dir(input_dir:str,
 
     if not recursive:
         # get the list of pdb files
-        pdb_files = [f for f in os.listdir(input_dir) if f.endswith('.pdb')]
+        pdb_files = [f for f in os.listdir(input_dir) if f.endswith(".pdb")]
         pdb_files = sorted(pdb_files, key=lambda x: int(x.split("_")[-7]))
-
-
 
         # make names unique
         msa_name = input_dir.split(os.sep)[-1]
@@ -140,18 +126,18 @@ def protonate_backbone_AF_dir(input_dir:str,
         print(dirs)
         dirs = [dir_name for dir_name in dirs if os.path.isdir(os.path.join(input_dir, dir_name))]
 
-        print(len(dirs))    
-        dirs = sorted(dirs, key=lambda x: int(x.split("_")[1]), reverse=True) # sort by max MSA size - descending order so that the largest MSA is first- this means that the first frame is likely a good topology
-        print(len(dirs))    
-
-
+        print(len(dirs))
+        dirs = sorted(
+            dirs, key=lambda x: int(x.split("_")[1]), reverse=True
+        )  # sort by max MSA size - descending order so that the largest MSA is first- this means that the first frame is likely a good topology
+        print(len(dirs))
 
         # loop over the directories using concurrent futures
         with ProcessPoolExecutor() as executor:
             for dir in dirs:
                 input_subdir = os.path.join(input_dir, dir)
                 # output_subdir = os.path.join(output_dir, dir)
-                executor.submit(protonate_backbone_AF_dir, input_subdir, output_dir,clean=False)
+                executor.submit(protonate_backbone_AF_dir, input_subdir, output_dir, clean=False)
 
 
 if __name__ == "__main__":
@@ -166,37 +152,35 @@ if __name__ == "__main__":
     # protonate_backbone_AF_dir(input_dir, output_dir)
 
     # ###
-    test_dir = "/homes/hussain/hussain-simulation_hdx/projects/xFold_Sampling3/af_sample/BPTI/BPTI/P00974_60_0_af_sample_127_10000"
-    protonate_backbone_AF_dir(test_dir, recursive=True)
-    
+    # test_dir = "/homes/hussain/hussain-simulation_hdx/projects/xFold_Sampling3/af_sample/BPTI/BPTI/P00974_60_0_af_sample_127_10000"
+    # protonate_backbone_AF_dir(test_dir, recursive=True)
 
-    test_dir = "/homes/hussain/hussain-simulation_hdx/projects/xFold_Sampling3/af_sample/BPTI/BPTI/P00974_60_1_af_sample_127_10000"
-    protonate_backbone_AF_dir(test_dir, recursive=True)
+    # test_dir = "/homes/hussain/hussain-simulation_hdx/projects/xFold_Sampling3/af_sample/BPTI/BPTI/P00974_60_1_af_sample_127_10000"
+    # protonate_backbone_AF_dir(test_dir, recursive=True)
 
-    test_dir = "/homes/hussain/hussain-simulation_hdx/projects/xFold_Sampling3/af_sample/BPTI/BPTI/P00974_60_2_af_sample_127_10000"
-    protonate_backbone_AF_dir(test_dir, recursive=True)
+    # test_dir = "/homes/hussain/hussain-simulation_hdx/projects/xFold_Sampling3/af_sample/BPTI/BPTI/P00974_60_2_af_sample_127_10000"
+    # protonate_backbone_AF_dir(test_dir, recursive=True)
 
+    # test_dir = "/homes/hussain/hussain-simulation_hdx/projects/xFold_Sampling3/af_sample/BPTI/BPTI/P00974_60_3_af_sample_127_10000"
+    # protonate_backbone_AF_dir(test_dir, recursive=True)
 
-    test_dir = "/homes/hussain/hussain-simulation_hdx/projects/xFold_Sampling3/af_sample/BPTI/BPTI/P00974_60_3_af_sample_127_10000"
-    protonate_backbone_AF_dir(test_dir, recursive=True)
+    # input_dir1 = "/homes/hussain/hussain-simulation_hdx/projects/xFold_Sampling3/af_sample/MBP/MBP/MBP_wt_1_af_sample_127_10000"
+    # # # output_dir1 = "/home/alexi/Documents/colabquicktest/af_sample/MBP/MBP_wt_protonated"
 
-    input_dir1 = "/homes/hussain/hussain-simulation_hdx/projects/xFold_Sampling3/af_sample/MBP/MBP/MBP_wt_1_af_sample_127_10000"
-    # # output_dir1 = "/home/alexi/Documents/colabquicktest/af_sample/MBP/MBP_wt_protonated"
+    # protonate_backbone_AF_dir(input_dir1, recursive=True)
 
-    protonate_backbone_AF_dir(input_dir1, recursive=True)
+    # input_dir2 = "/homes/hussain/hussain-simulation_hdx/projects/xFold_Sampling3/af_sample/LXRa/LXRa/LXRa200_1_af_sample_127_10000"
+    # # output_dir2 = "/home/alexi/Documents/colabquicktest/af_sample/LXRa/LXRa_protonated"
 
-    input_dir2 = "/homes/hussain/hussain-simulation_hdx/projects/xFold_Sampling3/af_sample/LXRa/LXRa/LXRa200_1_af_sample_127_10000"
-    # output_dir2 = "/home/alexi/Documents/colabquicktest/af_sample/LXRa/LXRa_protonated"
+    # protonate_backbone_AF_dir(input_dir2, recursive=True)
 
-    protonate_backbone_AF_dir(input_dir2, recursive=True)
+    # input_dir3 = "/homes/hussain/hussain-simulation_hdx/projects/xFold_Sampling3/af_sample/HOIP/HOIP/HOIP_apo697_1_af_sample_127_10000"
+    # # output_dir3 = "/home/alexi/Documents/colabquicktest/af_sample/HOIP/HOIP_apo_protonated"
 
-    input_dir3 = "/homes/hussain/hussain-simulation_hdx/projects/xFold_Sampling3/af_sample/HOIP/HOIP/HOIP_apo697_1_af_sample_127_10000"
-    # output_dir3 = "/home/alexi/Documents/colabquicktest/af_sample/HOIP/HOIP_apo_protonated"
+    # protonate_backbone_AF_dir(input_dir3, recursive=True)
 
-    protonate_backbone_AF_dir(input_dir3, recursive=True)
-
-    input_dir4 = "/homes/hussain/hussain-simulation_hdx/projects/xFold_Sampling3/af_sample/BRD4/BRD4/BRD4_APO_484_1_af_sample_127_10000"
-    protonate_backbone_AF_dir(input_dir4, recursive=True)
+    # input_dir4 = "/homes/hussain/hussain-simulation_hdx/projects/xFold_Sampling3/af_sample/BRD4/BRD4/BRD4_APO_484_1_af_sample_127_10000"
+    # protonate_backbone_AF_dir(input_dir4, recursive=True)
     # # output_dir4 = "/data/chem-cat/lina4225/xFold_Sampling/af_sample/BRD4/BRD4_APO_484_af_sample_1000_protonated"
 
     # # input_dir = "/vols/opig/projects/hussian-simulation_hdx/projects/xFold_Sampling/af_sample/BPTI/P00974_60_0_af_sample_10000"
@@ -207,3 +191,13 @@ if __name__ == "__main__":
 
     # # input_dir = "/vols/opig/projects/hussian-simulation_hdx/projects/xFold_Sampling/af_sample/BPTI/P00974_60_3_af_sample_10000"
     # # protonate_backbone_AF_dir(input_dir, recursive=True)
+
+    input_dir = (
+        "/home/alexi/Documents/xFold_Sampling/af_sample/HOIP_dab3/HOIP_dab3_1_af_sample_21_100"
+    )
+    protonate_backbone_AF_dir(input_dir, recursive=True)
+
+    input_dir = (
+        "/home/alexi/Documents/xFold_Sampling/af_sample/HOIP_dab3/HOIP_dab3_3_af_sample_21_100"
+    )
+    protonate_backbone_AF_dir(input_dir, recursive=True)
