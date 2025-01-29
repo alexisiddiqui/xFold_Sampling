@@ -7,3 +7,16 @@ af_sample/*/**/**/.pdb
 af_sample/*/**/**/.xtc
 
 bak
+
+*.xtc
+*.pdb
+*.h5
+*.pkl
+
+
+boltz_sample/*/**/
+
+
+*.pdb
+
+*.xtc
