@@ -20,14 +20,10 @@ timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
 @dataclass
 class BoltzParams:
-    sampling_steps: list[int] = field(default_factory=lambda: [200])
-    recycling_steps: list[int] = field(
-        default_factory=lambda: [
-            1,
-        ]
-    )
-    diffusion_samples: list[int] = field(default_factory=lambda: [100])
-    step_scale: list[float] = field(default_factory=lambda: [1])
+    sampling_steps: list[int] = field(default_factory=lambda: [200, 25])
+    recycling_steps: list[int] = field(default_factory=lambda: [3, 10])
+    diffusion_samples: list[int] = field(default_factory=lambda: [5])
+    step_scale: list[float] = field(default_factory=lambda: [1.638])
     output_format: list[str] = field(default_factory=lambda: ["pdb"])
     num_workers: list[int] = field(default_factory=lambda: [4])
     override: list[bool] = field(default_factory=lambda: [True])
@@ -36,6 +32,7 @@ class BoltzParams:
     msa_pairing_strategy: list[str] = field(default_factory=lambda: ["greedy"])
     write_full_pae: list[bool] = field(default_factory=lambda: [False])
     write_full_pde: list[bool] = field(default_factory=lambda: [False])
+    max_paired_seqs: List[int] = field(default_factory=lambda: [8])
 
 
 def combine_pdbs_to_xtc(predictions_dir: str, output_xtc: str):
@@ -419,6 +416,7 @@ def main():
         msa_pairing_strategy,
         write_full_pae,
         write_full_pde,
+        max_paired_seqs,
     ) in product(
         params.sampling_steps,
         params.recycling_steps,
@@ -432,8 +430,9 @@ def main():
         params.msa_pairing_strategy,
         params.write_full_pae,
         params.write_full_pde,
+        params.max_paired_seqs,
     ):
-        suffix = f"steps{sampling_steps}_recycle{recycling_steps}_diff{diffusion_samples}_scale{step_scale}"
+        suffix = f"steps{sampling_steps}_recycle{recycling_steps}_diff{diffusion_samples}_scale{step_scale}_maxseqs{max_paired_seqs}"
         output_name = f"{base_name}_{suffix}"
         output_dir = os.path.join(parent_dir, output_name)  # Changed to parent_dir
         os.makedirs(output_dir, exist_ok=True)
@@ -460,6 +459,10 @@ def main():
             "--write_full_pde" if write_full_pde else "",
             "--out_dir",
             output_dir,
+            "--max_msa_seqs",
+            str(max_paired_seqs),
+            "--seed",
+            "42",
         ]
 
         # Remove empty strings from the command
