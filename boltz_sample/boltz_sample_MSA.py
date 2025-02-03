@@ -20,7 +20,7 @@ timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
 @dataclass
 class BoltzParams:
-    sampling_steps: list[int] = field(default_factory=lambda: [200, 25])
+    sampling_steps: list[int] = field(default_factory=lambda: [25])
     recycling_steps: list[int] = field(default_factory=lambda: [3, 10])
     diffusion_samples: list[int] = field(default_factory=lambda: [5])
     step_scale: list[float] = field(default_factory=lambda: [1.638])
@@ -507,6 +507,13 @@ def main():
 
     combine_all_json_files(base_name, output_dirs, parent_dir)
     create_visualizations(base_name, output_dirs, parent_dir)
+
+    # compress entire directory to a tar.gz file
+    shutil.make_archive(parent_dir, "gztar", parent_dir)
+    print(f"Compressed directory to {parent_dir}.tar.gz")
+
+    # if compressing was successful, remove the original directory
+    shutil.rmtree(parent_dir)
 
     print("All processing completed successfully.")
 
