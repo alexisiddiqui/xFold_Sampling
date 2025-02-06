@@ -21,18 +21,28 @@ timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 @dataclass
 class BoltzParams:
     sampling_steps: list[int] = field(default_factory=lambda: [25])
-    recycling_steps: list[int] = field(default_factory=lambda: [3, 10])
-    diffusion_samples: list[int] = field(default_factory=lambda: [5])
+    recycling_steps: list[int] = field(default_factory=lambda: [10])
+    diffusion_samples: list[int] = field(
+        default_factory=lambda: [5]
+    )  # this is ur batch size - use wisely
     step_scale: list[float] = field(default_factory=lambda: [1.638])
     output_format: list[str] = field(default_factory=lambda: ["pdb"])
     num_workers: list[int] = field(default_factory=lambda: [4])
-    override: list[bool] = field(default_factory=lambda: [True])
     use_msa_server: list[bool] = field(default_factory=lambda: [True])
+    override: list[bool] = field(default_factory=lambda: [True])
     msa_server_url: list[str] = field(default_factory=lambda: ["https://api.colabfold.com"])
     msa_pairing_strategy: list[str] = field(default_factory=lambda: ["greedy"])
     write_full_pae: list[bool] = field(default_factory=lambda: [False])
     write_full_pde: list[bool] = field(default_factory=lambda: [False])
-    max_paired_seqs: List[int] = field(default_factory=lambda: [8])
+    max_paired_seqs: List[int] = field(default_factory=lambda: [32])
+    use_previous_msa: list[str] = field(
+        default_factory=lambda: ["/home/alexi/Documents/xFold_Sampling/boltz_sample/HOIP_dab3/msa"]
+    )
+    num_seeds: int = 3  # Number of seeds to run for each parameter combination
+
+    def __post_init__(self):
+        # Ensure that the number of seeds is a positive integer
+        self.seeds = list(range(self.num_seeds))
 
 
 def combine_pdbs_to_xtc(predictions_dir: str, output_xtc: str):
@@ -140,37 +150,56 @@ def combine_all_json_files(base_name: str, output_dirs: List[str], parent_dir: s
     return output_path
 
 
-def plot_confidence_scores(global_json_path: str, output_path: str):
+def plot_confidence_scores(global_json_path: str, output_path: str, group_by_seed: bool = True):
     """
-    Creates a subplot for each run showing confidence scores distribution with shared axes.
+    Creates a subplot for each parameter set showing confidence scores distribution with shared axes.
+    When group_by_seed is True, combines all seeds into a single distribution per parameter set.
     """
     with open(global_json_path, "r") as f:
         data = json.load(f)
 
-    # Group data by run
-    runs = {}
+    # Group data by parameter set and seed
+    param_sets = {}
     for item in data:
         run = item["run"]
-        if run not in runs:
-            runs[run] = []
-        runs[run].append(item["confidence_score"])
+        # Extract parameter set and seed number
+        param_parts = run.split("_")
+        try:
+            # Try to convert last part to int to verify it's a seed number
+            int(param_parts[-1])
+            param_set = "_".join(param_parts[:-1])
+        except ValueError:
+            param_set = run
 
-    # Create subplot for each run
-    n_runs = len(runs)
-    fig, axes = plt.subplots(n_runs, 1, figsize=(10, 4 * n_runs), squeeze=False)
+        if param_set not in param_sets:
+            param_sets[param_set] = []
+        param_sets[param_set].append(item["confidence_score"])
+
+    if not group_by_seed:
+        # If not grouping by seed, keep separate by run
+        runs = {}
+        for item in data:
+            run = item["run"]
+            if run not in runs:
+                runs[run] = []
+            runs[run].append(item["confidence_score"])
+        param_sets = runs
+
+    # Create subplot for each parameter set
+    n_param_sets = len(param_sets)
+    fig, axes = plt.subplots(n_param_sets, 1, figsize=(12, 4 * n_param_sets), squeeze=False)
 
     # Find global min and max for consistent axes
-    all_scores = [score for scores in runs.values() for score in scores]
+    all_scores = [score for scores in param_sets.values() for score in scores]
     global_min = min(all_scores)
     global_max = max(all_scores)
 
-    for i, (run, scores) in enumerate(runs.items()):
+    for i, (param_set, scores) in enumerate(param_sets.items()):
         ax = axes[i, 0]
         sns.histplot(scores, ax=ax, bins=20)
-        ax.set_title(f"Confidence Score Distribution - {run}")
+        ax.set_title(f"Confidence Score Distribution - {param_set}")
         ax.set_xlabel("Confidence Score")
         ax.set_ylabel("Count")
-        # Set consistent x-axis limits
         ax.set_xlim(global_min, global_max)
 
     plt.tight_layout()
@@ -193,11 +222,23 @@ def calculate_ca_coordinates(pdb_path: str) -> np.ndarray:
 
 
 def plot_pca_analysis(
-    base_name: str, output_dirs: List[str], global_json_path: str, output_path: str
+    base_name: str,
+    output_dirs: List[str],
+    global_json_path: str,
+    output_path: str,
+    group_by_seed: bool = False,
 ):
     """
     Performs PCA on CA positions using XTC trajectories with highest confidence PDB as topology.
     Creates scatter plots for all runs combined and individual runs with shared axes.
+    Optionally groups different seeds of the same parameter set together.
+
+    Args:
+        base_name: Base name for files
+        output_dirs: List of output directories
+        global_json_path: Path to global JSON file
+        output_path: Where to save the plot
+        group_by_seed: If True, groups different seeds with same parameters together
     """
     # Load confidence scores from global JSON
     with open(global_json_path, "r") as f:
@@ -226,6 +267,21 @@ def plot_pca_analysis(
     # Process each run's XTC file
     for output_dir in output_dirs:
         run_name = os.path.basename(output_dir)
+
+        # Extract parameter set name (everything before the seed number if grouping by seed)
+        if group_by_seed:
+            # Split by underscore and remove the last part (seed number)
+            param_parts = run_name.split("_")
+            try:
+                # Try to convert last part to int to verify it's a seed number
+                int(param_parts[-1])
+                param_set = "_".join(param_parts[:-1])
+            except ValueError:
+                # If last part isn't a number, use full run_name
+                param_set = run_name
+        else:
+            param_set = run_name
+
         xtc_path = os.path.join(
             output_dir, f"boltz_results_{base_name}", "predictions", f"{base_name}_combined.xtc"
         )
@@ -245,11 +301,16 @@ def plot_pca_analysis(
             run_coords.append(coords)
             all_coordinates.append(coords)
 
+        # Initialize parameter set if not exists
+        if param_set not in runs:
+            runs[param_set] = {"coordinates": [], "scores": [], "seeds": []}
+
         # Store run data
-        runs[run_name] = {
-            "coordinates": run_coords,
-            "scores": run_scores.get(run_name, [None] * len(run_coords)),
-        }
+        runs[param_set]["coordinates"].extend(run_coords)
+        runs[param_set]["scores"].extend(run_scores.get(run_name, [None] * len(run_coords)))
+        if group_by_seed:
+            runs[param_set]["seeds"].extend([run_name] * len(run_coords))
+
         all_scores.extend(run_scores.get(run_name, [None] * len(run_coords)))
 
     # Convert to numpy arrays
@@ -286,9 +347,9 @@ def plot_pca_analysis(
     axes[0].set_ylim(y_min, y_max)
     plt.colorbar(scatter_all, ax=axes[0], label="Confidence Score")
 
-    # Plot individual runs
+    # Plot individual parameter sets
     start_idx = 0
-    for idx, (run_name, run_data) in enumerate(runs.items(), start=1):
+    for idx, (param_set, run_data) in enumerate(runs.items(), start=1):
         n_frames = len(run_data["coordinates"])
         end_idx = start_idx + n_frames
 
@@ -296,19 +357,41 @@ def plot_pca_analysis(
         run_coords_2d = coords_all_2d[start_idx:end_idx]
         run_scores = run_data["scores"]
 
-        scatter = axes[idx].scatter(
-            run_coords_2d[:, 0],
-            run_coords_2d[:, 1],
-            c=run_scores,
-            cmap="viridis",
-            s=50,
-            alpha=0.7,
-            vmin=score_min,
-            vmax=score_max,
-        )
+        if group_by_seed and "seeds" in run_data:
+            # Create different markers/colors for different seeds
+            unique_seeds = list(set(run_data["seeds"]))
+            for seed in unique_seeds:
+                seed_mask = np.array(run_data["seeds"]) == seed
+                seed_coords = run_coords_2d[seed_mask]
+                seed_scores = np.array(run_scores)[seed_mask]
+
+                scatter = axes[idx].scatter(
+                    seed_coords[:, 0],
+                    seed_coords[:, 1],
+                    c=seed_scores,
+                    cmap="viridis",
+                    s=50,
+                    alpha=0.7,
+                    vmin=score_min,
+                    vmax=score_max,
+                    label=seed,
+                )
+            # axes[idx].legend(title="Seeds", bbox_to_anchor=(1.05, 1), loc="upper left")
+        else:
+            scatter = axes[idx].scatter(
+                run_coords_2d[:, 0],
+                run_coords_2d[:, 1],
+                c=run_scores,
+                cmap="viridis",
+                s=50,
+                alpha=0.7,
+                vmin=score_min,
+                vmax=score_max,
+            )
+
         axes[idx].set_xlabel(f"PC1 ({pca_all.explained_variance_ratio_[0]:.2%} variance)")
         axes[idx].set_ylabel(f"PC2 ({pca_all.explained_variance_ratio_[1]:.2%} variance)")
-        axes[idx].set_title(f"PCA of CA Positions - {run_name}")
+        axes[idx].set_title(f"PCA of CA Positions - {param_set}")
         axes[idx].set_xlim(x_min, x_max)
         axes[idx].set_ylim(y_min, y_max)
         plt.colorbar(scatter, ax=axes[idx], label="Confidence Score")
@@ -316,24 +399,31 @@ def plot_pca_analysis(
         start_idx = end_idx
 
     plt.tight_layout()
-    plt.savefig(output_path)
+    plt.savefig(output_path, bbox_inches="tight")
     plt.close()
 
 
-def create_visualizations(base_name: str, output_dirs: List[str], parent_dir: str):
+def create_visualizations(
+    base_name: str, output_dirs: List[str], parent_dir: str, group_by_seed: bool = True
+):
     """
     Creates all visualizations.
+    Args:
+        base_name: Base name for files
+        output_dirs: List of output directories
+        parent_dir: Parent directory for output
+        group_by_seed: If True, groups different seeds with same parameters together in plots
     """
     # First create global JSON
     global_json_path = combine_all_json_files(base_name, output_dirs, parent_dir)
 
     # Create confidence score plots
     confidence_plot_path = os.path.join(parent_dir, f"{base_name}_confidence_distributions.png")
-    plot_confidence_scores(global_json_path, confidence_plot_path)
+    plot_confidence_scores(global_json_path, confidence_plot_path, group_by_seed)
 
     # Create PCA plot
     pca_plot_path = os.path.join(parent_dir, f"{base_name}_pca_analysis.png")
-    plot_pca_analysis(base_name, output_dirs, global_json_path, pca_plot_path)
+    plot_pca_analysis(base_name, output_dirs, global_json_path, pca_plot_path, group_by_seed)
 
     print("Visualizations created:")
     print(f"- Global JSON: {global_json_path}")
@@ -393,7 +483,7 @@ def find_highest_confidence_structure(base_name: str, output_dirs: List[str], fi
 def main():
     params = BoltzParams()
 
-    input_path = "/home/alexi/Documents/xFold_Sampling/boltz_sample/HOIP/HOIP_apo697.fasta"
+    input_path = "/home/alexi/Documents/xFold_Sampling/boltz_sample/HOIP_dab3/HOIP_dab3.fasta"
     input_dir = os.path.dirname(input_path)
     file_name = os.path.basename(input_path)
     base_name = os.path.splitext(os.path.basename(input_path))[0]
@@ -417,6 +507,8 @@ def main():
         write_full_pae,
         write_full_pde,
         max_paired_seqs,
+        seed,
+        msa_path,
     ) in product(
         params.sampling_steps,
         params.recycling_steps,
@@ -431,12 +523,17 @@ def main():
         params.write_full_pae,
         params.write_full_pde,
         params.max_paired_seqs,
+        params.seeds,
+        params.use_previous_msa,
     ):
         suffix = f"steps{sampling_steps}_recycle{recycling_steps}_diff{diffusion_samples}_scale{step_scale}_maxseqs{max_paired_seqs}"
-        output_name = f"{base_name}_{suffix}"
+        output_name = f"{base_name}_{suffix}_{seed}"
         output_dir = os.path.join(parent_dir, output_name)  # Changed to parent_dir
         os.makedirs(output_dir, exist_ok=True)
         output_dirs.append(output_dir)
+
+        if msa_path is not None:
+            use_msa_server = False
 
         cmd = [
             "boltz",
@@ -461,8 +558,9 @@ def main():
             output_dir,
             "--max_msa_seqs",
             str(max_paired_seqs),
-            "--seed",
-            "42",
+            f"--seed={seed}",
+            "--previous_msa_dir",
+            str(msa_path),
         ]
 
         # Remove empty strings from the command
@@ -509,11 +607,13 @@ def main():
     create_visualizations(base_name, output_dirs, parent_dir)
 
     # compress entire directory to a tar.gz file
-    shutil.make_archive(parent_dir, "gztar", parent_dir)
+    shutil.make_archive(
+        parent_dir, "gztar", os.path.dirname(parent_dir), os.path.basename(parent_dir)
+    )
     print(f"Compressed directory to {parent_dir}.tar.gz")
 
     # if compressing was successful, remove the original directory
-    shutil.rmtree(parent_dir)
+    # shutil.rmtree(parent_dir)
 
     print("All processing completed successfully.")
 

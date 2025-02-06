@@ -20,3 +20,8 @@ boltz_sample/*/**/
 *.pdb
 
 *.xtc
+
+*.tar.gz
+
+
+boltz_sample/*/*.tar.gz
