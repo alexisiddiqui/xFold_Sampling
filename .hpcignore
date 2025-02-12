@@ -1,0 +1,28 @@
+
+
+# excludes the directories after the first - keeps the files at the first level
+af_sample/*/**/
+# just to be sure we will exclude pdbs in the third level
+!af_sample/*/**/**/.pdb
+!af_sample/*/**/**/.xtc
+
+bak
+
+!*.xtc
+!*.pdb
+*.h5
+*.pkl
+
+# ignore directories
+boltz_sample/*/**/
+
+
+# *.pdb
+
+# *.xtc
+
+# *.tar.gz
+# dont ignore tar.gz files in the first level of boltz_sample
+!boltz_sample/*/*.tar.gz
+
+# boltz_sample/*/*.tar.gz
