@@ -23,22 +23,23 @@ class BoltzParams:
     sampling_steps: list[int] = field(default_factory=lambda: [25])
     recycling_steps: list[int] = field(default_factory=lambda: [10])
     diffusion_samples: list[int] = field(
-        default_factory=lambda: [5]
+        default_factory=lambda: [100]
     )  # this is ur batch size - use wisely
     step_scale: list[float] = field(default_factory=lambda: [1.638])
     output_format: list[str] = field(default_factory=lambda: ["pdb"])
-    num_workers: list[int] = field(default_factory=lambda: [4])
+    num_workers: list[int] = field(default_factory=lambda: [2])
     use_msa_server: list[bool] = field(default_factory=lambda: [True])
     override: list[bool] = field(default_factory=lambda: [True])
     msa_server_url: list[str] = field(default_factory=lambda: ["https://api.colabfold.com"])
     msa_pairing_strategy: list[str] = field(default_factory=lambda: ["greedy"])
     write_full_pae: list[bool] = field(default_factory=lambda: [False])
     write_full_pde: list[bool] = field(default_factory=lambda: [False])
-    max_paired_seqs: List[int] = field(default_factory=lambda: [32])
-    use_previous_msa: list[str] = field(
-        default_factory=lambda: ["/home/alexi/Documents/xFold_Sampling/boltz_sample/HOIP_dab3/msa"]
-    )
-    num_seeds: int = 3  # Number of seeds to run for each parameter combination
+    max_paired_seqs: List[int] = field(default_factory=lambda: [4,8,16,32,64,128])
+
+    # use_previous_msa: list[str] = field(
+    #     default_factory=lambda: ["/home/alexi/Documents/xFold_Sampling/boltz_sample/HOIP_dab3/msa"]
+    # )
+    num_seeds: int = 2  # Number of seeds to run for each parameter combination
 
     def __post_init__(self):
         # Ensure that the number of seeds is a positive integer
@@ -483,7 +484,14 @@ def find_highest_confidence_structure(base_name: str, output_dirs: List[str], fi
 def main():
     params = BoltzParams()
 
-    input_path = "/home/alexi/Documents/xFold_Sampling/boltz_sample/HOIP_dab3/HOIP_dab3.fasta"
+    this_script_dir = os.path.dirname(os.path.abspath(__file__))
+    os.chdir(this_script_dir)
+
+    input_path = f"{this_script_dir}/HOIP_dab3/HOIP_dab3.fasta"
+    previous_msa_dir = f"{this_script_dir}/HOIP_dab3"
+
+    params.use_previous_msa = [previous_msa_dir]
+
     input_dir = os.path.dirname(input_path)
     file_name = os.path.basename(input_path)
     base_name = os.path.splitext(os.path.basename(input_path))[0]
@@ -531,7 +539,7 @@ def main():
         output_dir = os.path.join(parent_dir, output_name)  # Changed to parent_dir
         os.makedirs(output_dir, exist_ok=True)
         output_dirs.append(output_dir)
-
+        cache_dir = "/data/scratch/hussain/.boltz"
         if msa_path is not None:
             use_msa_server = False
 
@@ -561,6 +569,8 @@ def main():
             f"--seed={seed}",
             "--previous_msa_dir",
             str(msa_path),
+            f"--cache={cache_dir}",
+
         ]
 
         # Remove empty strings from the command
@@ -613,7 +623,7 @@ def main():
     print(f"Compressed directory to {parent_dir}.tar.gz")
 
     # if compressing was successful, remove the original directory
-    # shutil.rmtree(parent_dir)
+    shutil.rmtree(parent_dir)
 
     print("All processing completed successfully.")
 
