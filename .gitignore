@@ -25,3 +25,9 @@ boltz_sample/*/**/
 
 
 boltz_sample/*/*.tar.gz
+
+# *analysis
+# *analysis*
+# *results*
+
+_*

@@ -26,3 +26,7 @@ boltz_sample/*/**/
 !boltz_sample/*/*.tar.gz
 
 # boltz_sample/*/*.tar.gz
+
+
+# use this flag to ignore folders that start with a certain prefix
+_*

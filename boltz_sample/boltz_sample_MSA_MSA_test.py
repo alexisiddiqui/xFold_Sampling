@@ -23,23 +23,23 @@ class BoltzParams:
     sampling_steps: list[int] = field(default_factory=lambda: [25])
     recycling_steps: list[int] = field(default_factory=lambda: [10])
     diffusion_samples: list[int] = field(
-        default_factory=lambda: [100]
+        default_factory=lambda: [10]
     )  # this is ur batch size - use wisely
     step_scale: list[float] = field(default_factory=lambda: [1.638])
     output_format: list[str] = field(default_factory=lambda: ["pdb"])
-    num_workers: list[int] = field(default_factory=lambda: [2])
+    num_workers: list[int] = field(default_factory=lambda: [10])
     use_msa_server: list[bool] = field(default_factory=lambda: [True])
     override: list[bool] = field(default_factory=lambda: [True])
     msa_server_url: list[str] = field(default_factory=lambda: ["https://api.colabfold.com"])
     msa_pairing_strategy: list[str] = field(default_factory=lambda: ["greedy"])
     write_full_pae: list[bool] = field(default_factory=lambda: [False])
     write_full_pde: list[bool] = field(default_factory=lambda: [False])
-    max_paired_seqs: List[int] = field(default_factory=lambda: [4,8,16,32,64,128])
-
+    max_paired_seqs: List[int] = field(default_factory=lambda: [0])
+    max_unpaired_seqs: List[int] = field(default_factory=lambda: [8192, 1024, 32])
     use_previous_msa: list[str] = field(
-        default_factory=lambda: ["/home/alexi/Documents/xFold_Sampling/boltz_sample/HOIP_dab3/msa"]
+        default_factory=lambda: ["/home/alexi/Documents/xFold_Sampling/boltz_sample/HOIP"]
     )
-    num_seeds: int = 20  # Number of seeds to run for each parameter combination
+    num_seeds: int = 10  # Number of seeds to run for each parameter combination
 
     def __post_init__(self):
         # Ensure that the number of seeds is a positive integer
@@ -222,17 +222,259 @@ def calculate_ca_coordinates(pdb_path: str) -> np.ndarray:
     return diff
 
 
+# def plot_pca_analysis(
+#     base_name: str,
+#     output_dirs: List[str],
+#     global_json_path: str,
+#     output_path: str,
+#     group_by_seed: bool = False,
+#     reference_pdb: str = None,
+# ):
+#     """
+#     Performs PCA on pairwise CA distances using XTC trajectories with highest confidence PDB as topology.
+#     Uses scipy's pdist and squareform for efficient pairwise distance calculation.
+#     Creates scatter plots for all runs combined and individual runs with shared axes.
+#     Optionally groups different seeds of the same parameter set together.
+#     Can include a reference structure (e.g., experimental structure) in the PCA plot.
+
+#     Args:
+#         base_name: Base name for files
+#         output_dirs: List of output directories
+#         global_json_path: Path to global JSON file
+#         output_path: Where to save the plot
+#         group_by_seed: If True, groups different seeds with same parameters together
+#     """
+#     import json
+#     import os
+
+#     import matplotlib.pyplot as plt
+#     import MDAnalysis as mda
+#     import numpy as np
+#     from scipy.spatial.distance import pdist
+
+#     # Load confidence scores from global JSON
+#     with open(global_json_path, "r") as f:
+#         data = json.load(f)
+
+#     # Create dictionary mapping run names to confidence scores
+#     run_scores = {}
+#     for item in data:
+#         run = item["run"]
+#         if run not in run_scores:
+#             run_scores[run] = []
+#         run_scores[run].append(item["confidence_score"])
+
+#     # Get the topology (highest confidence PDB)
+#     topology_pdb = os.path.join(
+#         os.path.dirname(global_json_path), f"{base_name}_highest_confidence.pdb"
+#     )
+#     if not os.path.exists(topology_pdb):
+#         raise FileNotFoundError(f"Topology PDB not found at {topology_pdb}")
+
+#     # Process reference structure if provided
+#     reference_distances = None
+#     if reference_pdb and os.path.exists(reference_pdb):
+#         ref_universe = mda.Universe(reference_pdb)
+#         ref_ca_atoms = ref_universe.select_atoms("name CA")
+#         reference_distances = pdist(ref_ca_atoms.positions)
+
+#     # Initialize for storing distance matrices and metadata
+#     all_distances = []
+#     all_scores = []
+#     runs = {}
+
+#     # Process each run's XTC file
+#     for output_dir in output_dirs:
+#         run_name = os.path.basename(output_dir)
+
+#         # Extract parameter set name (everything before the seed number if grouping by seed)
+#         if group_by_seed:
+#             # Split by underscore and remove the last part (seed number)
+#             param_parts = run_name.split("_")
+#             try:
+#                 # Try to convert last part to int to verify it's a seed number
+#                 int(param_parts[-1])
+#                 param_set = "_".join(param_parts[:-1])
+#             except ValueError:
+#                 # If last part isn't a number, use full run_name
+#                 param_set = run_name
+#         else:
+#             param_set = run_name
+
+#         xtc_path = os.path.join(
+#             output_dir, f"boltz_results_{base_name}", "predictions", f"{base_name}_combined.xtc"
+#         )
+
+#         if not os.path.exists(xtc_path):
+#             print(f"Warning: XTC file not found at {xtc_path}")
+#             continue
+
+#         # Load trajectory
+#         u = mda.Universe(topology_pdb, xtc_path)
+#         ca_atoms = u.select_atoms("name CA")
+
+#         # Extract pairwise distances for each frame
+#         run_distances = []
+#         for ts in u.trajectory:
+#             # Calculate condensed distance matrix using pdist (more efficient)
+#             # This gives us the pairwise distances between all CA atoms in a condensed form
+#             dist_matrix = pdist(ca_atoms.positions)
+#             run_distances.append(dist_matrix)
+#             all_distances.append(dist_matrix)
+
+#         # Initialize parameter set if not exists
+#         if param_set not in runs:
+#             runs[param_set] = {"distances": [], "scores": [], "seeds": []}
+
+#         # Store run data
+#         runs[param_set]["distances"].extend(run_distances)
+#         runs[param_set]["scores"].extend(run_scores.get(run_name, [None] * len(run_distances)))
+#         if group_by_seed:
+#             runs[param_set]["seeds"].extend([run_name] * len(run_distances))
+
+#         all_scores.extend(run_scores.get(run_name, [None] * len(run_distances)))
+
+#     # Convert to numpy arrays
+#     all_distances = np.array(all_distances)
+#     all_scores = np.array(all_scores)
+
+#     # Perform PCA on all distance data
+#     # Note: Each row of all_distances is already a flattened distance matrix (from pdist)
+#     pca_all = PCA(n_components=2)
+#     distances_all_2d = pca_all.fit_transform(all_distances)
+
+#     # Project reference structure onto PCA space if provided
+#     reference_coords_2d = None
+#     if reference_distances is not None:
+#         reference_coords_2d = pca_all.transform(reference_distances.reshape(1, -1))[0]
+
+#     # Create figure with subplots
+#     fig, axes = plt.subplots(len(runs) + 1, 1, figsize=(10, 5 * (len(runs) + 1)))
+
+#     # Make axes iterable even if there's only one run
+#     if len(runs) == 0:
+#         axes = [axes]
+
+#     # Find global min and max for consistent axes and color scaling
+#     x_min, x_max = distances_all_2d[:, 0].min(), distances_all_2d[:, 0].max()
+#     y_min, y_max = distances_all_2d[:, 1].min(), distances_all_2d[:, 1].max()
+#     score_min, score_max = np.nanmin(all_scores), np.nanmax(all_scores)
+
+#     # Plot all runs combined
+#     scatter_all = axes[0].scatter(
+#         distances_all_2d[:, 0],
+#         distances_all_2d[:, 1],
+#         c=all_scores,
+#         cmap="viridis",
+#         s=50,
+#         alpha=0.7,
+#         vmin=score_min,
+#         vmax=score_max,
+#     )
+
+#     # Add reference structure to the plot if available
+#     if reference_coords_2d is not None:
+#         axes[0].scatter(
+#             reference_coords_2d[0],
+#             reference_coords_2d[1],
+#             marker="*",
+#             color="red",
+#             s=200,
+#             label="Reference",
+#             edgecolor="black",
+#             zorder=10,
+#         )
+#         axes[0].legend()
+#     axes[0].set_xlabel(f"PC1 ({pca_all.explained_variance_ratio_[0]:.2%} variance)")
+#     axes[0].set_ylabel(f"PC2 ({pca_all.explained_variance_ratio_[1]:.2%} variance)")
+#     axes[0].set_title("PCA of CA Pairwise Distances - All Runs Combined")
+#     axes[0].set_xlim(x_min, x_max)
+#     axes[0].set_ylim(y_min, y_max)
+#     plt.colorbar(scatter_all, ax=axes[0], label="Confidence Score")
+
+#     # Plot individual parameter sets
+#     start_idx = 0
+#     for idx, (param_set, run_data) in enumerate(runs.items(), start=1):
+#         n_frames = len(run_data["distances"])
+#         end_idx = start_idx + n_frames
+
+#         # Plot using the global PCA projection
+#         run_coords_2d = distances_all_2d[start_idx:end_idx]
+#         run_scores = run_data["scores"]
+
+#         if group_by_seed and "seeds" in run_data:
+#             # Create different markers/colors for different seeds
+#             unique_seeds = list(set(run_data["seeds"]))
+#             for seed in unique_seeds:
+#                 seed_mask = np.array(run_data["seeds"]) == seed
+#                 seed_coords = run_coords_2d[seed_mask]
+#                 seed_scores = np.array(run_scores)[seed_mask]
+
+#                 scatter = axes[idx].scatter(
+#                     seed_coords[:, 0],
+#                     seed_coords[:, 1],
+#                     c=seed_scores,
+#                     cmap="viridis",
+#                     s=50,
+#                     alpha=0.7,
+#                     vmin=score_min,
+#                     vmax=score_max,
+#                     label=seed,
+#                 )
+#             # Optional: Add legend for seeds
+#             # axes[idx].legend(title="Seeds", bbox_to_anchor=(1.05, 1), loc="upper left")
+#         else:
+#             scatter = axes[idx].scatter(
+#                 run_coords_2d[:, 0],
+#                 run_coords_2d[:, 1],
+#                 c=run_scores,
+#                 cmap="viridis",
+#                 s=50,
+#                 alpha=0.7,
+#                 vmin=score_min,
+#                 vmax=score_max,
+#             )
+
+#         # Add reference structure to individual plots if available
+#         if reference_coords_2d is not None:
+#             axes[idx].scatter(
+#                 reference_coords_2d[0],
+#                 reference_coords_2d[1],
+#                 marker="*",
+#                 color="red",
+#                 s=200,
+#                 label="Reference",
+#                 edgecolor="black",
+#                 zorder=10,
+#             )
+#             axes[idx].legend()
+
+#         axes[idx].set_xlabel(f"PC1 ({pca_all.explained_variance_ratio_[0]:.2%} variance)")
+#         axes[idx].set_ylabel(f"PC2 ({pca_all.explained_variance_ratio_[1]:.2%} variance)")
+#         axes[idx].set_title(f"PCA of CA Pairwise Distances - {param_set}")
+#         axes[idx].set_xlim(x_min, x_max)
+#         axes[idx].set_ylim(y_min, y_max)
+#         plt.colorbar(scatter, ax=axes[idx], label="Confidence Score")
+
+#         start_idx = end_idx
+
+#     plt.tight_layout()
+#     plt.savefig(output_path, bbox_inches="tight")
+#     plt.close()
+
+
 def plot_pca_analysis(
     base_name: str,
     output_dirs: List[str],
     global_json_path: str,
     output_path: str,
     group_by_seed: bool = False,
+    reference_pdb: str = None,
+    subtract_reference: bool = False,
 ):
     """
-    Performs PCA on CA positions using XTC trajectories with highest confidence PDB as topology.
-    Creates scatter plots for all runs combined and individual runs with shared axes.
-    Optionally groups different seeds of the same parameter set together.
+    Performs PCA on pairwise CA distances using XTC trajectories with highest confidence PDB as topology.
+    Aligns the residues between reference and model structures before analysis.
 
     Args:
         base_name: Base name for files
@@ -240,7 +482,17 @@ def plot_pca_analysis(
         global_json_path: Path to global JSON file
         output_path: Where to save the plot
         group_by_seed: If True, groups different seeds with same parameters together
+        reference_pdb: Path to reference PDB structure
+        subtract_reference: If True, analyzes differences from reference
     """
+    import json
+    import os
+
+    import matplotlib.pyplot as plt
+    import MDAnalysis as mda
+    import numpy as np
+    from scipy.spatial.distance import pdist
+
     # Load confidence scores from global JSON
     with open(global_json_path, "r") as f:
         data = json.load(f)
@@ -260,8 +512,59 @@ def plot_pca_analysis(
     if not os.path.exists(topology_pdb):
         raise FileNotFoundError(f"Topology PDB not found at {topology_pdb}")
 
-    # Initialize universe with topology
-    all_coordinates = []
+    # Load the topology universe to use as a reference for generated structures
+    topology_universe = mda.Universe(topology_pdb)
+    topology_ca_atoms = topology_universe.select_atoms("name CA")
+
+    # Process reference structure if provided
+    reference_distances = None
+    reference_ca_indices = None
+    if reference_pdb and os.path.exists(reference_pdb):
+        ref_universe = mda.Universe(reference_pdb)
+        ref_ca_atoms = ref_universe.select_atoms("name CA")
+
+        print(f"Reference structure has {ref_ca_atoms.n_atoms} CA atoms")
+        print(f"Topology structure has {topology_ca_atoms.n_atoms} CA atoms")
+
+        # Find common residues between reference and topology
+        # Create dictionaries mapping residue IDs to atom indices
+        ref_res_dict = {(r.resname, r.resid): i for i, r in enumerate(ref_ca_atoms.residues)}
+        top_res_dict = {(r.resname, r.resid): i for i, r in enumerate(topology_ca_atoms.residues)}
+
+        # Find common residue identifiers
+        common_resids = set(ref_res_dict.keys()).intersection(set(top_res_dict.keys()))
+
+        if not common_resids:
+            # If no exact matches, try matching just by residue index position
+            print("No matching residue IDs found. Attempting to match by sequence position...")
+
+            # Match by position in the sequence
+            min_length = min(len(ref_ca_atoms), len(topology_ca_atoms))
+            common_indices = list(range(min_length))
+            ref_indices = common_indices
+            top_indices = common_indices
+        else:
+            print(f"Found {len(common_resids)} matching residues between reference and topology")
+            ref_indices = [ref_res_dict[resid] for resid in common_resids]
+            top_indices = [top_res_dict[resid] for resid in common_resids]
+
+        # Extract coordinates for common residues
+        ref_coords = ref_ca_atoms.positions[ref_indices]
+        # Calculate reference distances using only common residues
+        reference_distances = pdist(ref_coords)
+
+        # Store reference CA indices for later use
+        reference_ca_indices = ref_indices
+        topology_ca_indices = top_indices
+
+        print(f"Using {len(reference_ca_indices)} common CA atoms for analysis")
+
+        # If subtract_reference is True, we'll need the reference for sure
+        if subtract_reference and reference_distances is None:
+            raise ValueError("Reference PDB is required when subtract_reference is True")
+
+    # Initialize for storing distance matrices and metadata
+    all_distances = []
     all_scores = []
     runs = {}
 
@@ -295,45 +598,93 @@ def plot_pca_analysis(
         u = mda.Universe(topology_pdb, xtc_path)
         ca_atoms = u.select_atoms("name CA")
 
-        # Extract coordinates and store them
-        run_coords = []
+        # Extract pairwise distances for each frame
+        run_distances = []
         for ts in u.trajectory:
-            coords = ca_atoms.positions.flatten()  # Flatten for PCA
-            run_coords.append(coords)
-            all_coordinates.append(coords)
+            # Get CA atom positions
+            positions = ca_atoms.positions
+
+            # Use topology indices if we're comparing with reference
+            if reference_ca_indices is not None:
+                positions = positions[topology_ca_indices]
+
+            # Calculate condensed distance matrix using pdist (more efficient)
+            dist_matrix = pdist(positions)
+
+            # Subtract reference distances if requested and available
+            if subtract_reference and reference_distances is not None:
+                # Check if the dimensions match
+                if len(dist_matrix) == len(reference_distances):
+                    dist_matrix = dist_matrix - reference_distances
+                else:
+                    print(
+                        f"Warning: Reference has {len(reference_distances)} distances but frame has {len(dist_matrix)}. Skipping subtraction."
+                    )
+
+            run_distances.append(dist_matrix)
+            all_distances.append(dist_matrix)
 
         # Initialize parameter set if not exists
         if param_set not in runs:
-            runs[param_set] = {"coordinates": [], "scores": [], "seeds": []}
+            runs[param_set] = {"distances": [], "scores": [], "seeds": []}
 
         # Store run data
-        runs[param_set]["coordinates"].extend(run_coords)
-        runs[param_set]["scores"].extend(run_scores.get(run_name, [None] * len(run_coords)))
+        runs[param_set]["distances"].extend(run_distances)
+        runs[param_set]["scores"].extend(run_scores.get(run_name, [None] * len(run_distances)))
         if group_by_seed:
-            runs[param_set]["seeds"].extend([run_name] * len(run_coords))
+            runs[param_set]["seeds"].extend([run_name] * len(run_distances))
 
-        all_scores.extend(run_scores.get(run_name, [None] * len(run_coords)))
+        all_scores.extend(run_scores.get(run_name, [None] * len(run_distances)))
 
     # Convert to numpy arrays
-    all_coordinates = np.array(all_coordinates)
+    all_distances = np.array(all_distances)
     all_scores = np.array(all_scores)
 
-    # Perform PCA on all data
+    if len(all_distances) == 0:
+        print("No distances calculated. Cannot perform PCA.")
+        return
+
+    # Perform PCA on all distance data
     pca_all = PCA(n_components=2)
-    coords_all_2d = pca_all.fit_transform(all_coordinates)
+    distances_all_2d = pca_all.fit_transform(all_distances)
+
+    # Project reference structure onto PCA space if provided
+    reference_coords_2d = None
+    if reference_distances is not None and not subtract_reference:
+        # Since we're already using matching residues, this should work correctly
+        reference_coords_2d = pca_all.transform(reference_distances.reshape(1, -1))[0]
+
+    # In subtraction mode, reference would be at the origin (0,0) since diff would be zero
+    if subtract_reference and reference_distances is not None:
+        reference_coords_2d = np.array([0, 0])
 
     # Create figure with subplots
     fig, axes = plt.subplots(len(runs) + 1, 1, figsize=(10, 5 * (len(runs) + 1)))
 
+    # Make axes iterable even if there's only one run
+    if len(runs) == 0:
+        axes = [axes]
+    elif len(runs) == 1:
+        axes = [axes[0], axes[1]]
+
     # Find global min and max for consistent axes and color scaling
-    x_min, x_max = coords_all_2d[:, 0].min(), coords_all_2d[:, 0].max()
-    y_min, y_max = coords_all_2d[:, 1].min(), coords_all_2d[:, 1].max()
-    score_min, score_max = np.nanmin(all_scores), np.nanmax(all_scores)
+    x_min, x_max = distances_all_2d[:, 0].min(), distances_all_2d[:, 0].max()
+    y_min, y_max = distances_all_2d[:, 1].min(), distances_all_2d[:, 1].max()
+
+    # Handle potential NaN values in scores
+    valid_scores = all_scores[~np.isnan(all_scores)]
+    if len(valid_scores) > 0:
+        score_min, score_max = np.nanmin(valid_scores), np.nanmax(valid_scores)
+    else:
+        score_min, score_max = 0, 1  # Default values if all scores are NaN
+
+    # Create title suffix based on whether we're using raw distances or differences
+    title_suffix = "Differences from Reference" if subtract_reference else "Pairwise Distances"
 
     # Plot all runs combined
     scatter_all = axes[0].scatter(
-        coords_all_2d[:, 0],
-        coords_all_2d[:, 1],
+        distances_all_2d[:, 0],
+        distances_all_2d[:, 1],
         c=all_scores,
         cmap="viridis",
         s=50,
@@ -341,9 +692,23 @@ def plot_pca_analysis(
         vmin=score_min,
         vmax=score_max,
     )
+
+    # Add reference structure to the plot if available
+    if reference_coords_2d is not None:
+        axes[0].scatter(
+            reference_coords_2d[0],
+            reference_coords_2d[1],
+            marker="*",
+            color="red",
+            s=200,
+            label="Reference",
+            edgecolor="black",
+            zorder=10,
+        )
+        axes[0].legend()
     axes[0].set_xlabel(f"PC1 ({pca_all.explained_variance_ratio_[0]:.2%} variance)")
     axes[0].set_ylabel(f"PC2 ({pca_all.explained_variance_ratio_[1]:.2%} variance)")
-    axes[0].set_title("PCA of CA Positions - All Runs Combined")
+    axes[0].set_title(f"PCA of CA {title_suffix} - All Runs Combined")
     axes[0].set_xlim(x_min, x_max)
     axes[0].set_ylim(y_min, y_max)
     plt.colorbar(scatter_all, ax=axes[0], label="Confidence Score")
@@ -351,11 +716,11 @@ def plot_pca_analysis(
     # Plot individual parameter sets
     start_idx = 0
     for idx, (param_set, run_data) in enumerate(runs.items(), start=1):
-        n_frames = len(run_data["coordinates"])
+        n_frames = len(run_data["distances"])
         end_idx = start_idx + n_frames
 
         # Plot using the global PCA projection
-        run_coords_2d = coords_all_2d[start_idx:end_idx]
+        run_coords_2d = distances_all_2d[start_idx:end_idx]
         run_scores = run_data["scores"]
 
         if group_by_seed and "seeds" in run_data:
@@ -377,7 +742,6 @@ def plot_pca_analysis(
                     vmax=score_max,
                     label=seed,
                 )
-            # axes[idx].legend(title="Seeds", bbox_to_anchor=(1.05, 1), loc="upper left")
         else:
             scatter = axes[idx].scatter(
                 run_coords_2d[:, 0],
@@ -390,9 +754,23 @@ def plot_pca_analysis(
                 vmax=score_max,
             )
 
+        # Add reference structure to individual plots if available
+        if reference_coords_2d is not None:
+            axes[idx].scatter(
+                reference_coords_2d[0],
+                reference_coords_2d[1],
+                marker="*",
+                color="red",
+                s=200,
+                label="Reference",
+                edgecolor="black",
+                zorder=10,
+            )
+            axes[idx].legend()
+
         axes[idx].set_xlabel(f"PC1 ({pca_all.explained_variance_ratio_[0]:.2%} variance)")
         axes[idx].set_ylabel(f"PC2 ({pca_all.explained_variance_ratio_[1]:.2%} variance)")
-        axes[idx].set_title(f"PCA of CA Positions - {param_set}")
+        axes[idx].set_title(f"PCA of CA {title_suffix} - {param_set}")
         axes[idx].set_xlim(x_min, x_max)
         axes[idx].set_ylim(y_min, y_max)
         plt.colorbar(scatter, ax=axes[idx], label="Confidence Score")
@@ -404,32 +782,296 @@ def plot_pca_analysis(
     plt.close()
 
 
+def plot_wasserstein_distances(
+    base_name: str,
+    output_dirs: List[str],
+    global_json_path: str,
+    output_path: str,
+    reference_pdb: str,
+    group_by_seed: bool = True,
+):
+    """
+    Creates a subplot for each parameter set showing Wasserstein-1 (W1) distance distribution
+    between each frame and the reference structure, with proper alignment of residues.
+
+    Args:
+        base_name: Base name for files
+        output_dirs: List of output directories
+        global_json_path: Path to global JSON file
+        output_path: Where to save the plot
+        reference_pdb: Path to reference PDB structure
+        group_by_seed: If True, groups different seeds with same parameters together
+    """
+    import json
+    import os
+
+    import matplotlib.pyplot as plt
+    import MDAnalysis as mda
+    import numpy as np
+    import seaborn as sns
+    from scipy.spatial.distance import pdist
+    from scipy.stats import wasserstein_distance
+
+    # Load confidence scores from global JSON (for coloring or reference)
+    with open(global_json_path, "r") as f:
+        data = json.load(f)
+
+    # Create dictionary mapping run names to confidence scores
+    run_scores = {}
+    for item in data:
+        run = item["run"]
+        if run not in run_scores:
+            run_scores[run] = []
+        run_scores[run].append(item["confidence_score"])
+
+    # Get the topology (highest confidence PDB)
+    topology_pdb = os.path.join(
+        os.path.dirname(global_json_path), f"{base_name}_highest_confidence.pdb"
+    )
+    if not os.path.exists(topology_pdb):
+        raise FileNotFoundError(f"Topology PDB not found at {topology_pdb}")
+
+    # Load the topology universe
+    topology_universe = mda.Universe(topology_pdb)
+    topology_ca_atoms = topology_universe.select_atoms("name CA")
+
+    # Load reference structure
+    if not os.path.exists(reference_pdb):
+        raise FileNotFoundError(f"Reference PDB not found at {reference_pdb}")
+
+    ref_universe = mda.Universe(reference_pdb)
+    ref_ca_atoms = ref_universe.select_atoms("name CA")
+
+    print(f"Reference structure has {ref_ca_atoms.n_atoms} CA atoms")
+    print(f"Topology structure has {topology_ca_atoms.n_atoms} CA atoms")
+
+    # Find common residues between reference and topology
+    # Create dictionaries mapping residue IDs to atom indices
+    ref_res_dict = {(r.resname, r.resid): i for i, r in enumerate(ref_ca_atoms.residues)}
+    top_res_dict = {(r.resname, r.resid): i for i, r in enumerate(topology_ca_atoms.residues)}
+
+    # Find common residue identifiers
+    common_resids = set(ref_res_dict.keys()).intersection(set(top_res_dict.keys()))
+
+    if not common_resids:
+        # If no exact matches, try matching just by residue index position
+        print("No matching residue IDs found. Attempting to match by sequence position...")
+
+        # Match by position in the sequence
+        min_length = min(len(ref_ca_atoms), len(topology_ca_atoms))
+        common_indices = list(range(min_length))
+        ref_indices = common_indices
+        top_indices = common_indices
+    else:
+        print(f"Found {len(common_resids)} matching residues between reference and topology")
+        ref_indices = [ref_res_dict[resid] for resid in common_resids]
+        top_indices = [top_res_dict[resid] for resid in common_resids]
+
+    # Extract reference coordinates for common residues
+    ref_coords = ref_ca_atoms.positions[ref_indices]
+    reference_distances = pdist(ref_coords)
+
+    # Initialize for storing W1 distances
+    param_sets = {}
+
+    # Process each run's XTC file
+    for output_dir in output_dirs:
+        run_name = os.path.basename(output_dir)
+
+        # Extract parameter set name (everything before the seed number if grouping by seed)
+        if group_by_seed:
+            # Split by underscore and remove the last part (seed number)
+            param_parts = run_name.split("_")
+            try:
+                # Try to convert last part to int to verify it's a seed number
+                int(param_parts[-1])
+                param_set = "_".join(param_parts[:-1])
+            except ValueError:
+                # If last part isn't a number, use full run_name
+                param_set = run_name
+        else:
+            param_set = run_name
+
+        xtc_path = os.path.join(
+            output_dir, f"boltz_results_{base_name}", "predictions", f"{base_name}_combined.xtc"
+        )
+
+        if not os.path.exists(xtc_path):
+            print(f"Warning: XTC file not found at {xtc_path}")
+            continue
+
+        # Initialize parameter set if not exists
+        if param_set not in param_sets:
+            param_sets[param_set] = {"w1_distances": [], "confidence_scores": [], "runs": []}
+
+        # Load trajectory
+        u = mda.Universe(topology_pdb, xtc_path)
+        ca_atoms = u.select_atoms("name CA")
+
+        # Compute W1 distance for each frame
+        frame_distances = []
+        frame_confidences = []
+
+        for ts_idx, ts in enumerate(u.trajectory):
+            # Get positions for matching residues
+            positions = ca_atoms.positions[top_indices]
+
+            # Calculate pairwise distances for this frame
+            frame_dist_matrix = pdist(positions)
+
+            # Compute Wasserstein distance (Earth Mover's Distance)
+            w1_dist = wasserstein_distance(frame_dist_matrix, reference_distances)
+            frame_distances.append(w1_dist)
+
+            # Get corresponding confidence score if available
+            if ts_idx < len(run_scores.get(run_name, [])):
+                frame_confidences.append(run_scores[run_name][ts_idx])
+            else:
+                frame_confidences.append(None)
+
+        # Store distances and confidence scores
+        param_sets[param_set]["w1_distances"].extend(frame_distances)
+        param_sets[param_set]["confidence_scores"].extend(frame_confidences)
+        param_sets[param_set]["runs"].extend([run_name] * len(frame_distances))
+
+    # Create subplot for each parameter set
+    n_param_sets = len(param_sets)
+    if n_param_sets == 0:
+        print("No data to plot.")
+        return
+
+    fig, axes = plt.subplots(n_param_sets, 1, figsize=(12, 4 * n_param_sets), squeeze=False)
+
+    # Find global min and max for consistent axes
+    all_distances = [dist for p in param_sets.values() for dist in p["w1_distances"]]
+    if not all_distances:
+        print("No W1 distances calculated.")
+        return
+
+    global_min = min(all_distances)
+    global_max = max(all_distances)
+
+    # Create histograms for each parameter set
+    for i, (param_set, data) in enumerate(param_sets.items()):
+        ax = axes[i, 0]
+
+        # Plot histogram of W1 distances
+        sns.histplot(data["w1_distances"], ax=ax, bins=20, kde=True)
+
+        # Add vertical line for mean
+        mean_dist = np.mean(data["w1_distances"])
+        ax.axvline(mean_dist, color="red", linestyle="--", label=f"Mean: {mean_dist:.2f}")
+
+        # Add vertical line for median
+        median_dist = np.median(data["w1_distances"])
+        ax.axvline(median_dist, color="green", linestyle=":", label=f"Median: {median_dist:.2f}")
+
+        ax.set_title(f"W1 Distance to Reference - {param_set}")
+        ax.set_xlabel("Wasserstein-1 Distance")
+        ax.set_ylabel("Count")
+        ax.set_xlim(global_min, global_max)
+        ax.legend()
+
+        # Add text with statistics
+        stats_text = (
+            f"Mean: {mean_dist:.2f}\n"
+            f"Median: {median_dist:.2f}\n"
+            f"Min: {min(data['w1_distances']):.2f}\n"
+            f"Max: {max(data['w1_distances']):.2f}\n"
+            f"Std Dev: {np.std(data['w1_distances']):.2f}"
+        )
+        ax.text(
+            0.95,
+            0.95,
+            stats_text,
+            transform=ax.transAxes,
+            fontsize=10,
+            va="top",
+            ha="right",
+            bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
+        )
+
+    plt.tight_layout()
+    plt.savefig(output_path)
+    plt.close()
+
+    return param_sets  # Return the data in case further analysis is needed
+
+
+# 6sc6.pdb is the reference pdb and sits in the same directory as the script
 def create_visualizations(
     base_name: str, output_dirs: List[str], parent_dir: str, group_by_seed: bool = True
 ):
     """
-    Creates all visualizations.
+    Creates all visualizations with proper residue alignment between reference and model structures.
+
     Args:
         base_name: Base name for files
         output_dirs: List of output directories
         parent_dir: Parent directory for output
         group_by_seed: If True, groups different seeds with same parameters together in plots
     """
+    reference_pdb = os.path.join(
+        os.path.dirname(__file__), "HOIP_apo697_1_af_sample_127_10000_protonated_max_plddt_1969.pdb"
+    )
+
+    # Check if reference exists
+    if not os.path.exists(reference_pdb):
+        print(f"Warning: Reference PDB not found at {reference_pdb}")
+        print("Creating visualizations without reference structure...")
+        reference_pdb = None
+
     # First create global JSON
     global_json_path = combine_all_json_files(base_name, output_dirs, parent_dir)
 
-    # Create confidence score plots
+    # Create confidence score plots (these don't depend on residue alignment)
     confidence_plot_path = os.path.join(parent_dir, f"{base_name}_confidence_distributions.png")
     plot_confidence_scores(global_json_path, confidence_plot_path, group_by_seed)
 
-    # Create PCA plot
+    # Create PCA plots with proper residue alignment
     pca_plot_path = os.path.join(parent_dir, f"{base_name}_pca_analysis.png")
-    plot_pca_analysis(base_name, output_dirs, global_json_path, pca_plot_path, group_by_seed)
+    pca_diff_plot_path = os.path.join(parent_dir, f"{base_name}_pca_diff_analysis.png")
+
+    # Create regular PCA plot
+    plot_pca_analysis(
+        base_name,
+        output_dirs,
+        global_json_path,
+        pca_plot_path,
+        group_by_seed,
+        reference_pdb=reference_pdb,
+    )
+
+    # Only create difference plot if reference is available
+    if reference_pdb:
+        plot_pca_analysis(
+            base_name,
+            output_dirs,
+            global_json_path,
+            pca_diff_plot_path,
+            group_by_seed,
+            reference_pdb=reference_pdb,
+            subtract_reference=True,
+        )
+
+        # Create Wasserstein distance histogram (only if reference is available)
+        w1_plot_path = os.path.join(parent_dir, f"{base_name}_w1_distances.png")
+        plot_wasserstein_distances(
+            base_name,
+            output_dirs,
+            global_json_path,
+            w1_plot_path,
+            reference_pdb=reference_pdb,
+            group_by_seed=group_by_seed,
+        )
+        print(f"- Wasserstein distance histograms: {w1_plot_path}")
 
     print("Visualizations created:")
     print(f"- Global JSON: {global_json_path}")
     print(f"- Confidence distributions: {confidence_plot_path}")
     print(f"- PCA analysis: {pca_plot_path}")
+    if reference_pdb:
+        print(f"- PCA difference analysis: {pca_diff_plot_path}")
 
 
 def find_highest_confidence_structure(base_name: str, output_dirs: List[str], final_pdb_path: str):
@@ -515,6 +1157,7 @@ def main():
         write_full_pae,
         write_full_pde,
         max_paired_seqs,
+        max_unpaired_seqs,
         seed,
         msa_path,
     ) in product(
@@ -531,13 +1174,14 @@ def main():
         params.write_full_pae,
         params.write_full_pde,
         params.max_paired_seqs,
+        params.max_unpaired_seqs,
         params.seeds,
         params.use_previous_msa,
     ):
-        suffix = f"steps{sampling_steps}_recycle{recycling_steps}_diff{diffusion_samples}_scale{step_scale}_maxseqs{max_paired_seqs}"
+        suffix = f"steps{sampling_steps}_recycle{recycling_steps}_diff{diffusion_samples}_scale{step_scale}_maxseqs{max_paired_seqs}:{max_unpaired_seqs}"
         output_name = f"{base_name}_{suffix}_{seed}"
         output_dir = os.path.join(parent_dir, output_name)  # Changed to parent_dir
-        os.makedirs(output_dir, exist_ok=True)
+        os.makedirs(output_dir, exist_ok=True, mode=0o777)
         output_dirs.append(output_dir)
         cache_dir = "/data/localhost/not-backed-up/hussain/.boltz"
         if msa_path is not None:
@@ -566,11 +1210,12 @@ def main():
             output_dir,
             "--max_msa_seqs",
             str(max_paired_seqs),
+            "--max_unpaired_msa_seqs",
+            str(max_unpaired_seqs),
             f"--seed={seed}",
             "--previous_msa_dir",
             str(msa_path),
-            f"--cache={cache_dir}",
-
+            # f"--cache={cache_dir}",
         ]
 
         # Remove empty strings from the command

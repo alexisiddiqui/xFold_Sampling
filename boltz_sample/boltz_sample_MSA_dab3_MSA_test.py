@@ -34,12 +34,12 @@ class BoltzParams:
     msa_pairing_strategy: list[str] = field(default_factory=lambda: ["greedy"])
     write_full_pae: list[bool] = field(default_factory=lambda: [False])
     write_full_pde: list[bool] = field(default_factory=lambda: [False])
-    max_paired_seqs: List[int] = field(default_factory=lambda: [4,8,16,32,64,128])
+    max_paired_seqs: List[int] = field(default_factory=lambda: [0, 4, 8, 16, 32, 64, 128])
 
-    # use_previous_msa: list[str] = field(
-    #     default_factory=lambda: ["/home/alexi/Documents/xFold_Sampling/boltz_sample/HOIP_dab3/msa"]
-    # )
-    num_seeds: int = 2  # Number of seeds to run for each parameter combination
+    use_previous_msa: list[str] = field(
+        default_factory=lambda: ["/home/alexi/Documents/xFold_Sampling/boltz_sample/HOIP_dab3/msa"]
+    )
+    num_seeds: int = 3  # Number of seeds to run for each parameter combination
 
     def __post_init__(self):
         # Ensure that the number of seeds is a positive integer
@@ -487,8 +487,8 @@ def main():
     this_script_dir = os.path.dirname(os.path.abspath(__file__))
     os.chdir(this_script_dir)
 
-    input_path = f"{this_script_dir}/HOIP_dab3/HOIP_dab3.fasta"
-    previous_msa_dir = f"{this_script_dir}/HOIP_dab3"
+    input_path = f"{this_script_dir}/HOIP/HOIP_apo697.fasta"
+    previous_msa_dir = f"{this_script_dir}/HOIP"
 
     params.use_previous_msa = [previous_msa_dir]
 
@@ -539,7 +539,7 @@ def main():
         output_dir = os.path.join(parent_dir, output_name)  # Changed to parent_dir
         os.makedirs(output_dir, exist_ok=True)
         output_dirs.append(output_dir)
-        cache_dir = "/data/scratch/hussain/.boltz"
+        cache_dir = "/data/localhost/not-backed-up/hussain/.boltz"
         if msa_path is not None:
             use_msa_server = False
 
@@ -569,8 +569,7 @@ def main():
             f"--seed={seed}",
             "--previous_msa_dir",
             str(msa_path),
-            f"--cache={cache_dir}",
-
+            # f"--cache={cache_dir}",
         ]
 
         # Remove empty strings from the command

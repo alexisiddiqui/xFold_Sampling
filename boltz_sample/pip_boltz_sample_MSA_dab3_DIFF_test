@@ -21,25 +21,25 @@ timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 @dataclass
 class BoltzParams:
     sampling_steps: list[int] = field(default_factory=lambda: [25])
-    recycling_steps: list[int] = field(default_factory=lambda: [5, 10, 20])
+    recycling_steps: list[int] = field(default_factory=lambda: [10])
     diffusion_samples: list[int] = field(
-        default_factory=lambda: [50]
+        default_factory=lambda: [10]
     )  # this is ur batch size - use wisely
     step_scale: list[float] = field(default_factory=lambda: [1.638])
     output_format: list[str] = field(default_factory=lambda: ["pdb"])
-    num_workers: list[int] = field(default_factory=lambda: [4])
+    num_workers: list[int] = field(default_factory=lambda: [10])
     use_msa_server: list[bool] = field(default_factory=lambda: [True])
     override: list[bool] = field(default_factory=lambda: [True])
     msa_server_url: list[str] = field(default_factory=lambda: ["https://api.colabfold.com"])
     msa_pairing_strategy: list[str] = field(default_factory=lambda: ["greedy"])
     write_full_pae: list[bool] = field(default_factory=lambda: [False])
     write_full_pde: list[bool] = field(default_factory=lambda: [False])
-    max_paired_seqs: List[int] = field(default_factory=lambda: [1])
+    max_paired_seqs: List[int] = field(default_factory=lambda: [8192, 1024, 32, 1])
     max_unpaired_seqs: List[int] = field(default_factory=lambda: [0])
     use_previous_msa: list[str] = field(
         default_factory=lambda: ["/home/alexi/Documents/xFold_Sampling/boltz_sample/HOIP_dab3/msa"]
     )
-    num_seeds: int = 3  # Number of seeds to run for each parameter combination
+    num_seeds: int = 10  # Number of seeds to run for each parameter combination
 
     def __post_init__(self):
         # Ensure that the number of seeds is a positive integer
@@ -474,11 +474,7 @@ def plot_pca_analysis(
 ):
     """
     Performs PCA on pairwise CA distances using XTC trajectories with highest confidence PDB as topology.
-    Uses scipy's pdist and squareform for efficient pairwise distance calculation.
-    Creates scatter plots for all runs combined and individual runs with shared axes.
-    Optionally groups different seeds of the same parameter set together.
-    Can include a reference structure (e.g., experimental structure) in the PCA plot.
-    Can subtract reference structure distances to visualize structural deviations.
+    Aligns the residues between reference and model structures before analysis.
 
     Args:
         base_name: Base name for files
@@ -486,6 +482,8 @@ def plot_pca_analysis(
         global_json_path: Path to global JSON file
         output_path: Where to save the plot
         group_by_seed: If True, groups different seeds with same parameters together
+        reference_pdb: Path to reference PDB structure
+        subtract_reference: If True, analyzes differences from reference
     """
     import json
     import os
@@ -514,12 +512,52 @@ def plot_pca_analysis(
     if not os.path.exists(topology_pdb):
         raise FileNotFoundError(f"Topology PDB not found at {topology_pdb}")
 
+    # Load the topology universe to use as a reference for generated structures
+    topology_universe = mda.Universe(topology_pdb)
+    topology_ca_atoms = topology_universe.select_atoms("name CA")
+
     # Process reference structure if provided
     reference_distances = None
+    reference_ca_indices = None
     if reference_pdb and os.path.exists(reference_pdb):
         ref_universe = mda.Universe(reference_pdb)
         ref_ca_atoms = ref_universe.select_atoms("name CA")
-        reference_distances = pdist(ref_ca_atoms.positions)
+
+        print(f"Reference structure has {ref_ca_atoms.n_atoms} CA atoms")
+        print(f"Topology structure has {topology_ca_atoms.n_atoms} CA atoms")
+
+        # Find common residues between reference and topology
+        # Create dictionaries mapping residue IDs to atom indices
+        ref_res_dict = {(r.resname, r.resid): i for i, r in enumerate(ref_ca_atoms.residues)}
+        top_res_dict = {(r.resname, r.resid): i for i, r in enumerate(topology_ca_atoms.residues)}
+
+        # Find common residue identifiers
+        common_resids = set(ref_res_dict.keys()).intersection(set(top_res_dict.keys()))
+
+        if not common_resids:
+            # If no exact matches, try matching just by residue index position
+            print("No matching residue IDs found. Attempting to match by sequence position...")
+
+            # Match by position in the sequence
+            min_length = min(len(ref_ca_atoms), len(topology_ca_atoms))
+            common_indices = list(range(min_length))
+            ref_indices = common_indices
+            top_indices = common_indices
+        else:
+            print(f"Found {len(common_resids)} matching residues between reference and topology")
+            ref_indices = [ref_res_dict[resid] for resid in common_resids]
+            top_indices = [top_res_dict[resid] for resid in common_resids]
+
+        # Extract coordinates for common residues
+        ref_coords = ref_ca_atoms.positions[ref_indices]
+        # Calculate reference distances using only common residues
+        reference_distances = pdist(ref_coords)
+
+        # Store reference CA indices for later use
+        reference_ca_indices = ref_indices
+        topology_ca_indices = top_indices
+
+        print(f"Using {len(reference_ca_indices)} common CA atoms for analysis")
 
         # If subtract_reference is True, we'll need the reference for sure
         if subtract_reference and reference_distances is None:
@@ -563,9 +601,15 @@ def plot_pca_analysis(
         # Extract pairwise distances for each frame
         run_distances = []
         for ts in u.trajectory:
+            # Get CA atom positions
+            positions = ca_atoms.positions
+
+            # Use topology indices if we're comparing with reference
+            if reference_ca_indices is not None:
+                positions = positions[topology_ca_indices]
+
             # Calculate condensed distance matrix using pdist (more efficient)
-            # This gives us the pairwise distances between all CA atoms in a condensed form
-            dist_matrix = pdist(ca_atoms.positions)
+            dist_matrix = pdist(positions)
 
             # Subtract reference distances if requested and available
             if subtract_reference and reference_distances is not None:
@@ -596,14 +640,18 @@ def plot_pca_analysis(
     all_distances = np.array(all_distances)
     all_scores = np.array(all_scores)
 
+    if len(all_distances) == 0:
+        print("No distances calculated. Cannot perform PCA.")
+        return
+
     # Perform PCA on all distance data
-    # Note: Each row of all_distances is already a flattened distance matrix (from pdist)
     pca_all = PCA(n_components=2)
     distances_all_2d = pca_all.fit_transform(all_distances)
 
-    # Plot using the global PCA projection
+    # Project reference structure onto PCA space if provided
     reference_coords_2d = None
     if reference_distances is not None and not subtract_reference:
+        # Since we're already using matching residues, this should work correctly
         reference_coords_2d = pca_all.transform(reference_distances.reshape(1, -1))[0]
 
     # In subtraction mode, reference would be at the origin (0,0) since diff would be zero
@@ -616,11 +664,19 @@ def plot_pca_analysis(
     # Make axes iterable even if there's only one run
     if len(runs) == 0:
         axes = [axes]
+    elif len(runs) == 1:
+        axes = [axes[0], axes[1]]
 
     # Find global min and max for consistent axes and color scaling
     x_min, x_max = distances_all_2d[:, 0].min(), distances_all_2d[:, 0].max()
     y_min, y_max = distances_all_2d[:, 1].min(), distances_all_2d[:, 1].max()
-    score_min, score_max = np.nanmin(all_scores), np.nanmax(all_scores)
+
+    # Handle potential NaN values in scores
+    valid_scores = all_scores[~np.isnan(all_scores)]
+    if len(valid_scores) > 0:
+        score_min, score_max = np.nanmin(valid_scores), np.nanmax(valid_scores)
+    else:
+        score_min, score_max = 0, 1  # Default values if all scores are NaN
 
     # Create title suffix based on whether we're using raw distances or differences
     title_suffix = "Differences from Reference" if subtract_reference else "Pairwise Distances"
@@ -686,8 +742,6 @@ def plot_pca_analysis(
                     vmax=score_max,
                     label=seed,
                 )
-            # Optional: Add legend for seeds
-            # axes[idx].legend(title="Seeds", bbox_to_anchor=(1.05, 1), loc="upper left")
         else:
             scatter = axes[idx].scatter(
                 run_coords_2d[:, 0],
@@ -738,7 +792,7 @@ def plot_wasserstein_distances(
 ):
     """
     Creates a subplot for each parameter set showing Wasserstein-1 (W1) distance distribution
-    between each frame and the reference structure.
+    between each frame and the reference structure, with proper alignment of residues.
 
     Args:
         base_name: Base name for files
@@ -770,20 +824,52 @@ def plot_wasserstein_distances(
             run_scores[run] = []
         run_scores[run].append(item["confidence_score"])
 
-    # Load reference structure
-    if not os.path.exists(reference_pdb):
-        raise FileNotFoundError(f"Reference PDB not found at {reference_pdb}")
-
-    ref_universe = mda.Universe(reference_pdb)
-    ref_ca_atoms = ref_universe.select_atoms("name CA")
-    reference_distances = pdist(ref_ca_atoms.positions)
-
     # Get the topology (highest confidence PDB)
     topology_pdb = os.path.join(
         os.path.dirname(global_json_path), f"{base_name}_highest_confidence.pdb"
     )
     if not os.path.exists(topology_pdb):
         raise FileNotFoundError(f"Topology PDB not found at {topology_pdb}")
+
+    # Load the topology universe
+    topology_universe = mda.Universe(topology_pdb)
+    topology_ca_atoms = topology_universe.select_atoms("name CA")
+
+    # Load reference structure
+    if not os.path.exists(reference_pdb):
+        raise FileNotFoundError(f"Reference PDB not found at {reference_pdb}")
+
+    ref_universe = mda.Universe(reference_pdb)
+    ref_ca_atoms = ref_universe.select_atoms("name CA")
+
+    print(f"Reference structure has {ref_ca_atoms.n_atoms} CA atoms")
+    print(f"Topology structure has {topology_ca_atoms.n_atoms} CA atoms")
+
+    # Find common residues between reference and topology
+    # Create dictionaries mapping residue IDs to atom indices
+    ref_res_dict = {(r.resname, r.resid): i for i, r in enumerate(ref_ca_atoms.residues)}
+    top_res_dict = {(r.resname, r.resid): i for i, r in enumerate(topology_ca_atoms.residues)}
+
+    # Find common residue identifiers
+    common_resids = set(ref_res_dict.keys()).intersection(set(top_res_dict.keys()))
+
+    if not common_resids:
+        # If no exact matches, try matching just by residue index position
+        print("No matching residue IDs found. Attempting to match by sequence position...")
+
+        # Match by position in the sequence
+        min_length = min(len(ref_ca_atoms), len(topology_ca_atoms))
+        common_indices = list(range(min_length))
+        ref_indices = common_indices
+        top_indices = common_indices
+    else:
+        print(f"Found {len(common_resids)} matching residues between reference and topology")
+        ref_indices = [ref_res_dict[resid] for resid in common_resids]
+        top_indices = [top_res_dict[resid] for resid in common_resids]
+
+    # Extract reference coordinates for common residues
+    ref_coords = ref_ca_atoms.positions[ref_indices]
+    reference_distances = pdist(ref_coords)
 
     # Initialize for storing W1 distances
     param_sets = {}
@@ -827,15 +913,11 @@ def plot_wasserstein_distances(
         frame_confidences = []
 
         for ts_idx, ts in enumerate(u.trajectory):
-            # Calculate pairwise distances for this frame
-            frame_dist_matrix = pdist(ca_atoms.positions)
+            # Get positions for matching residues
+            positions = ca_atoms.positions[top_indices]
 
-            # Check if dimensions match
-            if len(frame_dist_matrix) != len(reference_distances):
-                print(
-                    f"Warning: Reference has {len(reference_distances)} distances but frame has {len(frame_dist_matrix)}. Skipping frame."
-                )
-                continue
+            # Calculate pairwise distances for this frame
+            frame_dist_matrix = pdist(positions)
 
             # Compute Wasserstein distance (Earth Mover's Distance)
             w1_dist = wasserstein_distance(frame_dist_matrix, reference_distances)
@@ -917,13 +999,12 @@ def plot_wasserstein_distances(
 
 
 # 6sc6.pdb is the reference pdb and sits in the same directory as the script
-
-
 def create_visualizations(
     base_name: str, output_dirs: List[str], parent_dir: str, group_by_seed: bool = True
 ):
     """
-    Creates all visualizations.
+    Creates all visualizations with proper residue alignment between reference and model structures.
+
     Args:
         base_name: Base name for files
         output_dirs: List of output directories
@@ -932,17 +1013,24 @@ def create_visualizations(
     """
     reference_pdb = os.path.join(os.path.dirname(__file__), "6sc6.pdb")
 
+    # Check if reference exists
+    if not os.path.exists(reference_pdb):
+        print(f"Warning: Reference PDB not found at {reference_pdb}")
+        print("Creating visualizations without reference structure...")
+        reference_pdb = None
+
     # First create global JSON
     global_json_path = combine_all_json_files(base_name, output_dirs, parent_dir)
 
-    # Create confidence score plots
+    # Create confidence score plots (these don't depend on residue alignment)
     confidence_plot_path = os.path.join(parent_dir, f"{base_name}_confidence_distributions.png")
     plot_confidence_scores(global_json_path, confidence_plot_path, group_by_seed)
 
-    # Create PCA plot
+    # Create PCA plots with proper residue alignment
     pca_plot_path = os.path.join(parent_dir, f"{base_name}_pca_analysis.png")
     pca_diff_plot_path = os.path.join(parent_dir, f"{base_name}_pca_diff_analysis.png")
 
+    # Create regular PCA plot
     plot_pca_analysis(
         base_name,
         output_dirs,
@@ -951,32 +1039,37 @@ def create_visualizations(
         group_by_seed,
         reference_pdb=reference_pdb,
     )
-    plot_pca_analysis(
-        base_name,
-        output_dirs,
-        global_json_path,
-        pca_diff_plot_path,
-        group_by_seed,
-        reference_pdb=reference_pdb,
-        subtract_reference=True,
-    )
-    # Create Wasserstein distance histogram
-    w1_plot_path = os.path.join(parent_dir, f"{base_name}_w1_distances.png")
-    plot_wasserstein_distances(
-        base_name,
-        output_dirs,
-        global_json_path,
-        w1_plot_path,
-        reference_pdb=reference_pdb,
-        group_by_seed=group_by_seed,
-    )
+
+    # Only create difference plot if reference is available
+    if reference_pdb:
+        plot_pca_analysis(
+            base_name,
+            output_dirs,
+            global_json_path,
+            pca_diff_plot_path,
+            group_by_seed,
+            reference_pdb=reference_pdb,
+            subtract_reference=True,
+        )
+
+        # Create Wasserstein distance histogram (only if reference is available)
+        w1_plot_path = os.path.join(parent_dir, f"{base_name}_w1_distances.png")
+        plot_wasserstein_distances(
+            base_name,
+            output_dirs,
+            global_json_path,
+            w1_plot_path,
+            reference_pdb=reference_pdb,
+            group_by_seed=group_by_seed,
+        )
+        print(f"- Wasserstein distance histograms: {w1_plot_path}")
 
     print("Visualizations created:")
     print(f"- Global JSON: {global_json_path}")
     print(f"- Confidence distributions: {confidence_plot_path}")
     print(f"- PCA analysis: {pca_plot_path}")
-    print(f"- PCA difference analysis: {pca_diff_plot_path}")
-    print(f"- Wasserstein distance histograms: {w1_plot_path}")
+    if reference_pdb:
+        print(f"- PCA difference analysis: {pca_diff_plot_path}")
 
 
 def find_highest_confidence_structure(base_name: str, output_dirs: List[str], final_pdb_path: str):
@@ -1034,8 +1127,8 @@ def main():
     this_script_dir = os.path.dirname(os.path.abspath(__file__))
     os.chdir(this_script_dir)
 
-    input_path = f"{this_script_dir}/HOIP/HOIP_apo697.fasta"
-    previous_msa_dir = f"{this_script_dir}/HOIP"
+    input_path = f"{this_script_dir}/HOIP_dab3/HOIP_dab3.fasta"
+    previous_msa_dir = f"{this_script_dir}/HOIP_dab3/msa"
 
     params.use_previous_msa = [previous_msa_dir]
 
